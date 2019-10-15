@@ -1,0 +1,10 @@
+*.pyc
+.ipynb_checkpoints
+.idea/
+data/
+model/
+logs/
+runs/
+.vscode/
+.DS_Store
+*.gz
