@@ -4,7 +4,7 @@ import os
 import pickle
 import time
 
-from tensorflow import keras
+import tensorflow.keras as keras
 
 import numpy as np
 import pandas as pd
@@ -107,51 +107,45 @@ class SiameseSimilarity:
         model.summary()
         return model
 
-    def train(self, weights_only=True, call_back=False):
+    def train(self, call_back=False):
         model = self.__build_model()
-
         if call_back:
-            callbacks = self.build_callbacks(weights_only)
+            callbacks = self.build_callbacks()
         else:
             callbacks = None
         log.info('开始训练...')
-        model_trained = model.fit([self.x_train['left'], self.x_train['right']],
-                                  self.y_train,
-                                  batch_size=self.batch_size,
-                                  epochs=self.epochs,
-                                  validation_data=([self.x_val['left'], self.x_val['right']], self.y_val),
-                                  verbose=1,
-                                  callbacks=callbacks)
+        model.fit([self.x_train['left'], self.x_train['right']],
+                  self.y_train,
+                  batch_size=self.batch_size,
+                  epochs=self.epochs,
+                  validation_data=([self.x_val['left'], self.x_val['right']], self.y_val),
+                  verbose=1,
+                  callbacks=callbacks)
         log.info('训练完毕...')
-        if weights_only and not call_back:
-            model.save_weights(os.path.join(
-                self.model_path, 'weights_only.h5'))
-        elif not weights_only and not call_back:
-            model.save(os.path.join(self.model_path, 'model.h5'))
+        model.save(os.path.join(self.model_path, 'model.h5'))
         self._save_config()
-        plot(model_trained)
         return model
 
-    def build_callbacks(self, weights_only):
+    def build_callbacks(self):
         log.info('构建callbacks...')
-        early_stopping = keras.callbacks.EarlyStopping(monitor='val_loss', patience=30)
-        stamp = 'lstm_%d' % self.n_hidden
-        checkpoint_dir = os.path.join(
-            self.model_path, 'checkpoints/' + str(int(time.time())) + '/')
-        if not os.path.exists(checkpoint_dir):
-            os.makedirs(checkpoint_dir)
-
-        bst_model_path = checkpoint_dir + stamp + '.h5'
-        if weights_only:
-            model_checkpoint = keras.callbacks.ModelCheckpoint(
-                bst_model_path, save_best_only=True, save_weights_only=True)
-        else:
-            model_checkpoint = keras.callbacks.ModelCheckpoint(
-                bst_model_path, save_best_only=True)
-        tensor_board = keras.callbacks.TensorBoard(
-            log_dir=checkpoint_dir + "logs/{}".format(time.time()))
-        callbacks = [early_stopping, model_checkpoint, tensor_board]
+        early_stopping = keras.callbacks.EarlyStopping(monitor='loss', patience=5)
+        log_dir = os.path.join(self.model_path, 'logs/')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        tensor_board = keras.callbacks.TensorBoard(log_dir=log_dir)
+        callbacks = [early_stopping, tensor_board]
         return callbacks
+
+    def _load_config(self):
+        log.info('加载配置文件（词向量、词典和最大长度）')
+        try:
+            with open(self.config_path, 'rb') as config:
+                embeddings, vocabulary, max_seq_length = pickle.load(config)
+            if config:
+                config.close()
+        except FileNotFoundError:
+            embeddings, vocabulary, max_seq_length = None, None, None
+        return embeddings, vocabulary, max_seq_length
 
     def _save_config(self):
         with open(self.config_path, 'wb') as out:
@@ -179,17 +173,9 @@ class SiameseSimilarity:
         return self.model.predict([x1, x2])
 
     # 保存路径与加载路径相同
-    def _load_model(self, weights_only=True):
-        return self._load_model_by_path(self.model_path, weights_only)
-
-    # 自定义加载的模型路径
-    def _load_model_by_path(self, model_path, weights_only=True):
+    def _load_model(self):
         try:
-            if weights_only:
-                model = self.__build_model()
-                model.load_weights(model_path)
-            else:
-                model = keras.models.load_model(model_path)
+            model = keras.models.load_model(os.path.join(self.model_path, 'model.h5'))
         except FileNotFoundError:
             model = None
         return model
@@ -206,17 +192,6 @@ class SiameseSimilarity:
             if word in word2vec.vocab:
                 embeddings[index] = word2vec.word_vec(word)
         return embeddings
-
-    def _load_config(self):
-        log.info('加载配置文件（词向量和最大长度）')
-        try:
-            with open(self.config_path, 'rb') as config:
-                embeddings, vocabulary, max_seq_length = pickle.load(config)
-            if config:
-                config.close()
-        except FileNotFoundError:
-            embeddings, vocabulary, max_seq_length = None, None, None
-        return embeddings, vocabulary, max_seq_length
 
     def _load_data(self, test_size=0.2):
         # word:index和index:word
@@ -249,9 +224,7 @@ class SiameseSimilarity:
                             index_word.append(word)
                         else:
                             question_indexes.append(word_index[word])
-                    # dataset.set_value(index, question_col, question_indexes) # 已过期的函数
                     dataset.at[index, question_col] = question_indexes
-
         log.info('数据集处理完毕...')
 
         x = train_df[questions_cols]
